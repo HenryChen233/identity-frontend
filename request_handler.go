@@ -26,13 +26,6 @@ type Profile struct {
 }
 // Struct to contain page information
 
-type Response struct {
-	Code    int    `json:"code"`
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
-// Struct to store http response
 
 type UpdateInfo struct {
 	Username    string `json:"username"`
@@ -54,14 +47,11 @@ type LogInfo struct {
 	Password string `json:"password"`
 }
 
-// Struct to store login information
-var token = ""
-
 // initialize the token with an empty string at first
 
 // Save the edited information to backend
 func (p *Profile) saveToBackend() error {
-	link := "http://localhost:8080/v1/accounts/@me?token=" + token
+	link := "http://localhost:8080/v1/accounts/@me"
 	client := &http.Client{}
 	updateInfo := UpdateInfo{}
 	updateInfo.Username = p.Username
@@ -72,7 +62,6 @@ func (p *Profile) saveToBackend() error {
 		log.Println(err)
 	}
 	Data := string(jsonData)
-	// Encode the information to byte payload
 	payload := strings.NewReader(Data)
 	request, err := http.NewRequest("PUT", link, payload)
 	request.Header.Add("Content-Type", "application/json")
@@ -81,31 +70,24 @@ func (p *Profile) saveToBackend() error {
 	if err != nil {
 		log.Println(err)
 	}
+
 	return err
 }
 
 // Preload the information by fetching data from backend
 func readFromBackend(userid string) (*Profile, error) {
-	apiUrl := "http://localhost:8080/v1/accounts/@me?token=" + token
+	apiUrl := "http://localhost:8080/v1/accounts/@me"
 	res, err := http.Get(apiUrl)
 	if err != nil {
 		log.Println(err)
 	}
 	defer res.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(res.Body)
-	//var responseInfo Response
 	var pageInfo Profile
 	err = json.Unmarshal(bodyBytes, &pageInfo)
 	if err != nil {
 		log.Println(err)
 	}
-	// Extract the data from http response and generate data to render backend pages
-	//data := responseInfo.Message
-	//
-	//err = json.Unmarshal([]byte(data), &pageInfo)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
 	return &pageInfo, err
 }
 
@@ -208,7 +190,23 @@ func createHandler(w http.ResponseWriter, r *http.Request, title string){
 	if err != nil {
 		log.Println(err)
 	}
-	err = login(w, pageinfo.Username, pageinfo.Password)
+	user := LogInfo{}
+	user.Username = pageinfo.Username
+	user.Password = pageinfo.Password
+	userData, err := json.Marshal(user)
+	userString := string(userData)
+	payload = strings.NewReader(userString)
+	response, err := http.Post("http://localhost:8080/v1/sessions/", "application/json", payload)
+	if err != nil {
+		log.Println(err)
+	}
+	// Get token from login response from backend
+	token := response.Header.Get("Set-Cookie")
+	fmt.Println(token)
+	Cookie := http.Cookie{Name:"name-cookie",
+		Value: token,
+		HttpOnly:true}
+	http.SetCookie(w, &Cookie)
 	if err != nil {
 		log.Println(err)
 	}
@@ -224,7 +222,32 @@ func homeHandler(w http.ResponseWriter, r *http.Request, title string) {
 
 // Do the login job and set the token
 
-func login(w http.ResponseWriter, username string, password string) error {
+//func login(w http.ResponseWriter, username string, password string) error {
+//	user := LogInfo{}
+//	user.Username = username
+//	user.Password = password
+//	userData, err := json.Marshal(user)
+//	userString := string(userData)
+//	payload := strings.NewReader(userString)
+//	response, err := http.Post("http://localhost:8080/v1/sessions/", "application/json", payload)
+//	if err != nil {
+//		log.Println(err)
+//	}
+//	// Get token from login response from backend
+//	token := response.Header.Get("Set-Cookie")
+//
+//	Cookie := http.Cookie{Name:user.Username,
+//		Value: token,
+//		HttpOnly:true}
+//	http.SetCookie(w, &Cookie)
+//	//fmt.Println(token)
+//	return err
+//}
+
+func loginHandler(w http.ResponseWriter, r *http.Request, title string) {
+	// Get user login in information
+	username := r.FormValue("username")
+	password := r.FormValue("password")
 	user := LogInfo{}
 	user.Username = username
 	user.Password = password
@@ -236,29 +259,12 @@ func login(w http.ResponseWriter, username string, password string) error {
 		log.Println(err)
 	}
 	// Get token from login response from backend
-	token = response.Header.Get("Set-Cookie")
-	Cookie := http.Cookie{Name:user.Username,
+	token := response.Header.Get("Set-Cookie")
+	fmt.Println(token)
+	Cookie := http.Cookie{Name:"name-cookie",
 		Value: token,
 		HttpOnly:true}
 	http.SetCookie(w, &Cookie)
-	//fmt.Println(token)
-	return err
-}
-
-func loginHandler(w http.ResponseWriter, r *http.Request, title string) {
-	// Get user login in information
-	username := r.FormValue("username")
-	password := r.FormValue("password")
-	//User information struct
-	err := login(w,username, password)
-	if err != nil {
-		log.Println(err)
-	}
-	cookie,_ := r.Cookie(username)
-	//fmt.Println(r.Cookie("Alice"))
-	//fmt.Println(cookie)
-	// After login, redirect to private page
-	http.SetCookie(w, cookie)
 	http.Redirect(w, r, "/privatePage/", http.StatusFound)
 }
 
@@ -269,23 +275,20 @@ func registerHandler(w http.ResponseWriter, r *http.Request, title string) {
 
 func privateHandler(w http.ResponseWriter, r *http.Request, title string) {
 	fmt.Println("Cookie.......")
-	cookie,_ := r.Cookie("Alice")
+	cookie,_ := r.Cookie("name-cookie")
 	fmt.Println(cookie)
-	link := "http://localhost:8080/v1/accounts/@me?token=" + token
+	link := "http://localhost:8080/v1/accounts/@me?token=" + cookie.Value
 	resp, err := http.Get(link)
 	if err != nil {
 		log.Println(err)
 	}
 	defer resp.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	var responseInfo Response
-	err = json.Unmarshal(bodyBytes, &responseInfo)
+	var pageInfo = Profile{}
+	err = json.Unmarshal(bodyBytes, &pageInfo)
 	if err != nil {
 		log.Println(err)
 	}
-	data := responseInfo.Message
-	var pageInfo Profile
-	err = json.Unmarshal([]byte(data), &pageInfo)
 	renderTemplate(w, "profile", &pageInfo)
 }
 
