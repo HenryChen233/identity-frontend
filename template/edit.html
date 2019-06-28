@@ -7,12 +7,27 @@
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-primary bg-primary">
-    <a class="navbar-brand" href="#">Change Profile</a>
+    <a class="navbar-brand" href="#" style="color: #FFFFFF">Change Profile</a>
 </nav>
 
 <form action="/save/{{.Username}}" method="POST">
-    <div>Email: <textarea name="email" rows=1>{{printf "%s" .Email}}</textarea></div>
-    <div>Description <textarea name="description" rows=20 cols="100">{{printf "%s" .Description}}</textarea></div>
-    <div><input class = "btn btn-primary" type="submit" value="Save"></div>
+    <div class = "input-group mb-3" style="width: 30%; margin-top: 20px; margin-left: 30px">
+
+        <div class="input-group-prepend">
+            <span class="input-group-text">Email</span>
+        </div>
+        <textarea class="form-control" name="email" rows="1" col="10">
+                 {{printf "%s" .Email}}
+        </textarea>
+    </div>
+    <div class="input-group mb3" style="width: 50%; margin-left: 30px">
+        <div class="input-group-prepend">
+            <span class="input-group-text">Description</span>
+        </div>
+        <textarea class="form-control" name="description" rows="3" col="20">
+                 {{printf "%s" .Description}}
+        </textarea>
+    </div>
+    <div><input class = "btn btn-primary" type="submit" value="Save" style="margin-top: 20px; margin-left: 30px"></div>
 </form>
 </body>
