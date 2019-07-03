@@ -84,27 +84,32 @@ func readMyProfile() (*profile, error) {
 }
 
 // Function to read public information without login and render the web pages
-func readFromPublic(username string) (*publicInfo, error) {
-	link := backendURL + "/accounts/" + username
-	resp, err := client.Get(link)
+func readUserProfile(username string) (*publicInfo, error) {
+	url := backendURL + "/accounts/" + username
+	resp, err := client.Get(url)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	var pageData publicInfo
-	err = json.Unmarshal(bodyBytes, &pageData)
+	bs, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Println(err)
+		return nil, err
 	}
+
+	var pageData publicInfo
+	err = json.Unmarshal(bs, &pageData)
+	if err != nil {
+		return nil, err
+	}
+
 	return &pageData, err
 }
 
 //
 func accountsHandler(w http.ResponseWriter, r *http.Request) {
-	userid := r.URL.Path[len("/accounts/"):]
-	p, err := readFromPublic(userid)
+	username := r.URL.Path[len("/accounts/"):]
+	p, err := readUserProfile(username)
 	if err != nil {
 		log.Println(err)
 	}
