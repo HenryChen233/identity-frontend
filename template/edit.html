@@ -11,10 +11,9 @@
 </nav>
 
 <form action="/save/" method="POST">
-    <label for = "email">Email</label>
-    <input class="form-control" type="text" placeholder="Email" name = "email" required>
     <label for = "description">description</label>
-    <input class="form-control" type="text" placeholder="Description" name = "description" required>
+    <input class="form-control" type="text" placeholder= "{{.Description}}" name = "description" required>
+    <input class = "form-control" type = "hidden" name = "CSRFToken" placeholder="token" value="{{.Token}}">
     <div><input class = "btn btn-primary" type="submit" value="Save" style="margin-top: 20px; margin-left: 30px"></div>
     <div><a class = "btn btn-primary" href = "/password/" role = "button" style="margin-top: 20px">Change Password</a></div>
 </form>
