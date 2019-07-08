@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -43,12 +44,13 @@ type logInfo struct {
 }
 
 const (
-	backendURL       = "http://localhost:8080/v1"
+	backendURI       = "/v1"
 	timeoutInSeconds = 10
 )
 
 var (
-	client = &http.Client{
+	backendAddr, backendURL string
+	client                  = &http.Client{
 		Timeout: time.Second * timeoutInSeconds,
 	}
 	templates = template.Must(template.ParseGlob("./template/*.html"))
@@ -309,6 +311,10 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 
 //
 func main() {
+	flag.StringVar(&backendAddr, "backend", "localhost:8080", "backend IP and port")
+	flag.Parse()
+	backendURL = "http://" + backendAddr + backendURI
+
 	http.HandleFunc("/accounts/", accountsHandler)
 	http.HandleFunc("/edit/", editHandler)
 	http.HandleFunc("/save/", saveHandler)
