@@ -131,6 +131,8 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	p, err := readProfile(cookieValue)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
 	client := &http.Client{}
 	//
@@ -149,12 +151,15 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	request, err := http.NewRequest("POST",getTokenUrl,tokenPayload)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Cookie", cookieValue)
 	response, err :=client.Do(request)
 	if err != nil {
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
@@ -182,6 +187,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	if err != nil {
 		log.Println("Cookie may expire and need to login again ",err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
 	// Get the standard token to change the regular information
 	client := &http.Client{}
@@ -216,6 +222,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	if err != nil {
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		log.Println(err)
+		return
 	}
 	// After edited it redirect to the private information page
 	http.Redirect(w, r, "/privatePage/", http.StatusFound)
@@ -240,6 +247,7 @@ func passwordHandler(w http.ResponseWriter, r *http.Request)  {
 	token.Value = ""
 	tokenData, err := json.Marshal(token)
 	if err != nil {
+		log.Println(err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
@@ -250,12 +258,14 @@ func passwordHandler(w http.ResponseWriter, r *http.Request)  {
 	request, err := http.NewRequest("POST",getTokenUrl,tokenPayload)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Cookie", cookieValue)
 	response, err :=client.Do(request)
 	if err != nil {
+		log.Println(err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
@@ -265,6 +275,8 @@ func passwordHandler(w http.ResponseWriter, r *http.Request)  {
 	client.CloseIdleConnections()
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
 	updatePassword := UpdatePassword{}
 	updatePassword.Username = p.Username
@@ -284,9 +296,12 @@ func passwordSaveHandler(w http.ResponseWriter, r *http.Request){
 	if err != nil {
 		log.Println("login expire, log in again", err)
 		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
 	}
 	if newPassword != passwordConfirm {
+		log.Println("password does not match")
 		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
 	}
 	updatePassword := LogInfo{}
 	updatePassword.Username = originalProfile.Username
@@ -305,9 +320,11 @@ func passwordSaveHandler(w http.ResponseWriter, r *http.Request){
 	if response.StatusCode == 500 {
 		log.Println("Error Occur when changing password", err)
 		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
 	}
 	client.CloseIdleConnections()
 	if err != nil {
+		log.Println(err)
 		http.Redirect(w, r, "/password/", http.StatusFound)
 		return
 	}
@@ -362,6 +379,7 @@ func privateHandler(w http.ResponseWriter, r *http.Request) {
 	req.Header.Add("Cookie", cookieValue)
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Println(err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
@@ -371,6 +389,7 @@ func privateHandler(w http.ResponseWriter, r *http.Request) {
 	var pageInfo = Profile{}
 	err = json.Unmarshal(bodyBytes, &pageInfo)
 	if err != nil {
+		log.Println(err)
 		http.Redirect(w, r, "/home/", http.StatusFound)
 		return
 	}
@@ -391,6 +410,8 @@ func createHandler(w http.ResponseWriter, r *http.Request){
 	newUser, err := json.Marshal(pageinfo)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
 	}
 	Data := string(newUser)
 	payload := strings.NewReader(Data)
@@ -456,21 +477,27 @@ var templates = template.Must(template.ParseFiles("template/edit.html", "templat
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Profile) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
+		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
 func renderTemplateDescription(w http.ResponseWriter, tmpl string, p *UpdateDescription){
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
+		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
 func renderTemplatePassword(w http.ResponseWriter, tmpl string, p *UpdatePassword){
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
+		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
