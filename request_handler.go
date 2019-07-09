@@ -106,6 +106,7 @@ func accountsHandler(w http.ResponseWriter, r *http.Request, title string) {
 	p, err := readFromPublic(title)
 	if err != nil {
 		log.Println("account does not exist", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
 	page := Profile{}
@@ -160,6 +161,11 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	}
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Println("error occurred when reading response", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
 	err = json.Unmarshal(bodyBytes, &token)
 	if err != nil {
 		log.Println(err)
@@ -179,6 +185,11 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	token := r.FormValue("CSRFToken")
 	// Get cookie from browser
 	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
 	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
 	originalPage, err := readProfile(cookieValue)
 	if err != nil {
@@ -188,12 +199,6 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	}
 	// Get the standard token to change the regular information
 	client := &http.Client{}
-
-	if err != nil {
-		log.Println(err)
-		http.Redirect(w, r, "/loginError/", http.StatusFound)
-		return
-	}
 	// Change the information from preloaded information
 	updateInfo := PublicInfo{}
 	updateInfo.Username = originalPage.Username
@@ -210,7 +215,11 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	// Send http request
 	link := "http://localhost:8080/v1/accounts/@me?token=" + token
 	request, err := http.NewRequest("PUT", link, payload)
-
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
 	request.Header.Add("Cookie", cookieValue)
 	request.Header.Add("Content-Type", "application/json")
 	_, err = client.Do(request)
@@ -267,6 +276,11 @@ func passwordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
 	err = json.Unmarshal(bodyBytes, &token)
 	client.CloseIdleConnections()
 	if err != nil {
@@ -287,6 +301,11 @@ func passwordSaveHandler(w http.ResponseWriter, r *http.Request) {
 	token := r.FormValue("token")
 	// Get cookie from browser
 	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println("login expire, log in again", err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
+	}
 	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
 	originalProfile, err := readProfile(cookieValue)
 	if err != nil {
@@ -305,14 +324,25 @@ func passwordSaveHandler(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{}
 	// Json format transformation
 	jsonData, err := json.Marshal(updatePassword)
+
 	Data := string(jsonData)
 	payload := strings.NewReader(Data)
 	// Send http request
 	link := "http://localhost:8080/v1/accounts/@me?token=" + token
 	request, err := http.NewRequest("PUT", link, payload)
+	if err != nil {
+		log.Println("request failed")
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
 	request.Header.Add("Cookie", cookieValue)
 	request.Header.Add("Content-Type", "application/json")
 	response, err := client.Do(request)
+	if err != nil {
+		log.Println("request failed")
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
 	if response.StatusCode == 500 {
 		log.Println("Error Occur when changing password", err)
 		http.Redirect(w, r, "/password/", http.StatusFound)
@@ -341,7 +371,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	userString := string(userData)
 	payload := strings.NewReader(userString)
 	response, err := http.Post("http://localhost:8080/v1/sessions/", "application/json", payload)
-	if response.StatusCode == 401 || err != nil {
+	if err != nil {
 		log.Println("login Failure", err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
@@ -370,6 +400,11 @@ func privateHandler(w http.ResponseWriter, r *http.Request) {
 	cookie, _ := r.Cookie("V")
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", "http://localhost:8080/v1/accounts/@me", nil)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
 	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
 	req.Header.Add("Cookie", cookieValue)
 	resp, err := client.Do(req)
