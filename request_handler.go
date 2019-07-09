@@ -175,9 +175,8 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 	}
 	// Change the information from preloaded information
-	updateInfo := UpdateDescription{}
+	updateInfo := PublicInfo{}
 	updateInfo.Username = originalPage.Username
-	updateInfo.Token = token
 	updateInfo.Description = description
 	// Json format transformation
 	jsonData, err := json.Marshal(updateInfo)
@@ -187,7 +186,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	Data := string(jsonData)
 	payload := strings.NewReader(Data)
 	// Send http request
-	link := "http://localhost:8080/v1/accounts/@me"
+	link := "http://localhost:8080/v1/accounts/@me?token=" + token
 	request, err := http.NewRequest("PUT", link, payload)
 
 	// Get cookie from browser
@@ -198,6 +197,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	_, err = client.Do(request)
 	client.CloseIdleConnections()
 	if err != nil {
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		log.Println(err)
 	}
 	// After edited it redirect to the private information page
@@ -261,17 +261,16 @@ func passwordSaveHandler(w http.ResponseWriter, r *http.Request){
 	if newPassword != passwordConfirm {
 		http.Redirect(w, r, "/password/", http.StatusFound)
 	}
-	updatePassword := UpdatePassword{}
+	updatePassword := LogInfo{}
 	updatePassword.Username = originalProfile.Username
 	updatePassword.Password = newPassword
-	updatePassword.Token = token
 	client := &http.Client{}
 	// Json format transformation
 	jsonData, err := json.Marshal(updatePassword)
 	Data := string(jsonData)
 	payload := strings.NewReader(Data)
 	// Send http request
-	link := "http://localhost:8080/v1/accounts/@me"
+	link := "http://localhost:8080/v1/accounts/@me?token=" + token
 	request, err := http.NewRequest("PUT", link, payload)
 
 	// Get cookie from browser
