@@ -1,7 +1,3 @@
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (
@@ -14,7 +10,7 @@ import (
 	"strings"
 )
 
-// Contains all the information about user's information
+//Profile Contains all the information about user's information
 type Profile struct {
 	Username    string `json:"username"`
 	Firstname   string `json:"firstName"`
@@ -25,49 +21,50 @@ type Profile struct {
 	Verified    string `json:"verified"`
 }
 
-// Struct to contain page information using to update normal information
+//UpdateDescription Struct to contain page information using to update normal information
 type UpdateDescription struct {
 	Username    string `json:"username"`
 	Description string `json:"description"`
 	Token       string `json:"token"`
 }
 
-// Wrap up info to update email with CSRF token
+//UpdateEmail Wrap up info to update email with CSRF token
 type UpdateEmail struct {
-	Username    string `json:"username"`
-	Email string `json:"email"`
-	Token       string `json:"token"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Token    string `json:"token"`
 }
-// Wrap up info to update password with CSRF token
+
+//UpdatePassword Wrap up info to update password with CSRF token
 type UpdatePassword struct {
-	Username    string `json:"username"`
+	Username string `json:"username"`
 	Password string `json:"password"`
-	Token       string `json:"token"`
+	Token    string `json:"token"`
 }
 
-
-//Struct to store updated information
+//PublicInfo Struct to store updated information
 type PublicInfo struct {
 	Username    string `json:"username"`
 	Description string `json:"description"`
 }
 
-//Struct to store public page information
+//LogInfo Struct to store public page information
 type LogInfo struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-type TokenInfo struct{
-	Value string 	`json:"value"`
-	Type  string	`json:"type"`
+//TokenInfo to store the token value and type
+type TokenInfo struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
 }
 
 // Preload the information by fetching data from backend
 func readProfile(cookieValue string) (*Profile, error) {
-	apiUrl := "http://localhost:8080/v1/accounts/@me"
+	apiURL := "http://localhost:8080/v1/accounts/@me"
 	client := &http.Client{}
-	request, err := http.NewRequest("GET", apiUrl,nil)
+	request, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +91,7 @@ func readFromPublic(username string) (*PublicInfo, error) {
 	link := "http://localhost:8080/v1/accounts/" + username
 	resp, err := http.Get(link)
 	if err != nil {
-		log.Println("account does not exists",err)
+		log.Println("account does not exists", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -147,8 +144,8 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	tokenBuffer := string(tokenData)
 	tokenPayload := strings.NewReader(tokenBuffer)
 	// Get token request
-	getTokenUrl := "http://localhost:8080/v1/tokens"
-	request, err := http.NewRequest("POST",getTokenUrl,tokenPayload)
+	getTokenURL := "http://localhost:8080/v1/tokens"
+	request, err := http.NewRequest("POST", getTokenURL, tokenPayload)
 	if err != nil {
 		log.Println(err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
@@ -156,7 +153,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	}
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Cookie", cookieValue)
-	response, err :=client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
@@ -185,7 +182,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
 	originalPage, err := readProfile(cookieValue)
 	if err != nil {
-		log.Println("Cookie may expire and need to login again ",err)
+		log.Println("cookie may expire and need to login again ", err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
@@ -214,7 +211,6 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	link := "http://localhost:8080/v1/accounts/@me?token=" + token
 	request, err := http.NewRequest("PUT", link, payload)
 
-
 	request.Header.Add("Cookie", cookieValue)
 	request.Header.Add("Content-Type", "application/json")
 	_, err = client.Do(request)
@@ -228,14 +224,14 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/privatePage/", http.StatusFound)
 }
 
-func passwordHandler(w http.ResponseWriter, r *http.Request)  {
+func passwordHandler(w http.ResponseWriter, r *http.Request) {
 	// Get cookie
 	cookie, err := r.Cookie("V")
 	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
 	// Prefetch info to render pages from backend API
-	p,err := readProfile(cookieValue)
+	p, err := readProfile(cookieValue)
 	if err != nil {
-		log.Println("Cookie may expire login again", err)
+		log.Println("cookie may expire login again", err)
 		// When refactoring the code, a more specific page may needed
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
@@ -254,8 +250,8 @@ func passwordHandler(w http.ResponseWriter, r *http.Request)  {
 	tokenBuffer := string(tokenData)
 	tokenPayload := strings.NewReader(tokenBuffer)
 	// Get token request
-	getTokenUrl := "http://localhost:8080/v1/tokens"
-	request, err := http.NewRequest("POST",getTokenUrl,tokenPayload)
+	getTokenURL := "http://localhost:8080/v1/tokens"
+	request, err := http.NewRequest("POST", getTokenURL, tokenPayload)
 	if err != nil {
 		log.Println(err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
@@ -263,7 +259,7 @@ func passwordHandler(w http.ResponseWriter, r *http.Request)  {
 	}
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Cookie", cookieValue)
-	response, err :=client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		log.Println(err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
@@ -285,7 +281,7 @@ func passwordHandler(w http.ResponseWriter, r *http.Request)  {
 	renderTemplatePassword(w, "changePassword", &updatePassword)
 }
 
-func passwordSaveHandler(w http.ResponseWriter, r *http.Request){
+func passwordSaveHandler(w http.ResponseWriter, r *http.Request) {
 	newPassword := r.FormValue("newpassword")
 	passwordConfirm := r.FormValue("passwordconfirm")
 	token := r.FormValue("token")
@@ -345,7 +341,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	userString := string(userData)
 	payload := strings.NewReader(userString)
 	response, err := http.Post("http://localhost:8080/v1/sessions/", "application/json", payload)
-	if response.StatusCode == 401 || err != nil{
+	if response.StatusCode == 401 || err != nil {
 		log.Println("login Failure", err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
@@ -353,10 +349,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	// Get token from login response from backend
 	token := response.Header.Get("Set-Cookie")
 	// Set the cookies to the browser
-	Cookie := http.Cookie{Name:"V",
-		Value: token,
-		Path:"/",
-		HttpOnly:true}
+	Cookie := http.Cookie{Name: "V",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true}
 	http.SetCookie(w, &Cookie)
 	http.Redirect(w, r, "/privatePage/", http.StatusFound)
 	return
@@ -371,10 +367,9 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 //
 func privateHandler(w http.ResponseWriter, r *http.Request) {
 	// Read cookie from browser
-	cookie,_ := r.Cookie("V")
-	client := &http.Client{
-	}
-	req, err := http.NewRequest("GET", "http://localhost:8080/v1/accounts/@me",nil)
+	cookie, _ := r.Cookie("V")
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "http://localhost:8080/v1/accounts/@me", nil)
 	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
 	req.Header.Add("Cookie", cookieValue)
 	resp, err := client.Do(req)
@@ -397,7 +392,7 @@ func privateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 //
-func createHandler(w http.ResponseWriter, r *http.Request){
+func createHandler(w http.ResponseWriter, r *http.Request) {
 	var pageinfo Profile
 	pageinfo.Username = r.FormValue("username")
 	pageinfo.Firstname = r.FormValue("firstname")
@@ -418,8 +413,8 @@ func createHandler(w http.ResponseWriter, r *http.Request){
 	// Encode data to Json
 	_, err = http.Post("http://localhost:8080/v1/accounts/", "application/json", payload)
 	if err != nil {
-		log.Println("error occur when creating account",err)
-		http.Redirect(w, r, "/create/",http.StatusFound)
+		log.Println("error occur when creating account", err)
+		http.Redirect(w, r, "/create/", http.StatusFound)
 		return
 	}
 	// Send the request to create a new account
@@ -440,10 +435,10 @@ func createHandler(w http.ResponseWriter, r *http.Request){
 	// Get token from login response from backend
 	token := response.Header.Get("Set-Cookie")
 	// Set the cookie to the browser
-	Cookie := http.Cookie{Name:"V",
-		Value: token,
-		Path: "/",
-		HttpOnly:true}
+	Cookie := http.Cookie{Name: "V",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true}
 	http.SetCookie(w, &Cookie)
 	// After log in, redirect to the personal private page
 	http.Redirect(w, r, "/privatePage/", http.StatusFound)
@@ -454,21 +449,21 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	p := Profile{}
 	renderTemplate(w, "login", &p)
 }
+
 // Handle error when having wrong password and let user to re-enter password
-func errorPasswordHandler(w http.ResponseWriter, r *http.Request){
+func errorPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	p := Profile{}
 	renderTemplate(w, "loginError", &p)
 }
 
 // When user need to log out, this handler would erase the cookie to clean up the log in status.
-func logoutHandler(w http.ResponseWriter, r *http.Request){
-	logOutCookie := http.Cookie{Name:"V",
-		Path:"/",
-		MaxAge:-1}
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	logOutCookie := http.Cookie{Name: "V",
+		Path:   "/",
+		MaxAge: -1}
 	http.SetCookie(w, &logOutCookie)
-	http.Redirect(w, r, "/home/",http.StatusFound)
+	http.Redirect(w, r, "/home/", http.StatusFound)
 }
-
 
 // Load html template
 var templates = template.Must(template.ParseFiles("template/edit.html", "template/accounts.html", "template/register.html", "template/login.html", "template/public_profile.html", "template/profile.html", "template/loginError.html", "template/changePassword.html"))
@@ -483,7 +478,7 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Profile) {
 	}
 }
 
-func renderTemplateDescription(w http.ResponseWriter, tmpl string, p *UpdateDescription){
+func renderTemplateDescription(w http.ResponseWriter, tmpl string, p *UpdateDescription) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
 		log.Println(err)
@@ -492,7 +487,7 @@ func renderTemplateDescription(w http.ResponseWriter, tmpl string, p *UpdateDesc
 	}
 }
 
-func renderTemplatePassword(w http.ResponseWriter, tmpl string, p *UpdatePassword){
+func renderTemplatePassword(w http.ResponseWriter, tmpl string, p *UpdatePassword) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
 		log.Println(err)
