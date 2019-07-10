@@ -1,22 +1,16 @@
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
-
-// The following structs are declared to enable the use of JSON Marshalling
 
 type profile struct {
 	Username    string `json:"username"`
@@ -28,9 +22,10 @@ type profile struct {
 	Verified    string `json:"verified"`
 }
 
-type updateInfo struct {
-	Email       string `json:"email"`
+type updateDescription struct {
+	Username    string `json:"username"`
 	Description string `json:"description"`
+	Token       string `json:"token"`
 }
 
 type publicInfo struct {
@@ -41,6 +36,19 @@ type publicInfo struct {
 type logInfo struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+//UpdatePassword Wrap up info to update password with CSRF token
+type updatePassword struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Token    string `json:"token"`
+}
+
+//TokenInfo to store the token value and type
+type TokenInfo struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
 }
 
 const (
@@ -56,6 +64,15 @@ var (
 	templates = template.Must(template.ParseGlob("./template/*.html"))
 )
 
+func instanceToPayLoad(info interface{}) (*strings.Reader, error) {
+	tokenData, err := json.Marshal(info)
+	if err != nil {
+		return nil, err
+	}
+	tokenBuffer := string(tokenData)
+	return strings.NewReader(tokenBuffer), nil
+}
+
 func renderTemplate(w http.ResponseWriter, tmplName string, p *profile) {
 	err := templates.ExecuteTemplate(w, tmplName+".html", p)
 	if err != nil {
@@ -63,25 +80,29 @@ func renderTemplate(w http.ResponseWriter, tmplName string, p *profile) {
 	}
 }
 
-func readMyProfile() (*profile, error) {
+func readMyProfile(cookieValue string) (*profile, error) {
 	url := backendURL + "/accounts/@me"
-	resp, err := client.Get(url)
+	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	request.Header.Add("Cookie", cookieValue)
+	resp, err := client.Do(request)
+	if err != nil {
+		log.Println("Cookie may expire ", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
-
 	bs, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-
 	var pageInfo profile
 	err = json.Unmarshal(bs, &pageInfo)
 	if err != nil {
 		return nil, err
 	}
-
 	return &pageInfo, err
 }
 
@@ -113,102 +134,356 @@ func accountsHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Path[len("/accounts/"):]
 	p, err := readUserProfile(username)
 	if err != nil {
-		log.Println(err)
+		log.Println("account does not exist", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
 
-	page := profile{}
-	page.Username = p.Username
-	page.Description = p.Description
+	page := profile{Username: p.Username,
+		Description: p.Description}
 	renderTemplate(w, "public_profile", &page)
 }
 
 // Render the edit information page
 func editHandler(w http.ResponseWriter, r *http.Request) {
-	p, err := readMyProfile()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	cookie, err := r.Cookie("V")
+	if err != nil || cookie == nil {
+		log.Println("May log out or cookie expire", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
-	renderTemplate(w, "edit", p)
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	// Prefetch from backend API
+	p, err := readMyProfile(cookieValue)
+	if err != nil {
+		log.Println("error happened when getting profile",err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	client := &http.Client{}
+	//
+	token := TokenInfo{"", "STANDARD"}
+	tokenPayload, err := instanceToPayLoad(token)
+	if err != nil {
+		log.Println("error when decoding JSON", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	// Get token request
+	getTokenURL := backendURL + "/tokens/"
+	request, err := http.NewRequest("POST", getTokenURL, tokenPayload)
+	if err != nil {
+		log.Println("error when building request ",err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("Cookie", cookieValue)
+	response, err := client.Do(request)
+	if err != nil {
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	defer response.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Println("error occurred when reading response", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	err = json.Unmarshal(bodyBytes, &token)
+	if err != nil {
+		log.Println("Decode response error",err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	updateNormal := updateDescription{p.Username, p.Description, token.Value}
+	renderTemplateDescription(w, "edit", &updateNormal)
 }
 
 // The Function to save the edited information
-func saveHandler(w http.ResponseWriter, r *http.Request) {
-	email := r.FormValue("email")
+func saveEditedInfo(w http.ResponseWriter, r *http.Request) {
 	description := r.FormValue("description")
-	originalPage, err := readMyProfile()
+	token := r.FormValue("CSRFToken")
+	// Get cookie from browser
+	cookie, err := r.Cookie("V")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
 		return
 	}
-
-	// Get cookie from browser
-	cookie, err := r.Cookie("name-cookie")
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	originalPage, err := readMyProfile(cookieValue)
+	if err != nil {
+		log.Println("cookie may expire and need to login again ", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	// Get the standard token to change the regular information
+	client := &http.Client{}
 	// Change the information from preloaded information
-	originalPage.Email = email
-	originalPage.Description = description
-	updateInfo := updateInfo{}
-	updateInfo.Email = email
-	updateInfo.Description = description
+	updateInfo := updateDescription{Description: description,
+		Username: originalPage.Username,
+		Token:    token}
 	// Json format transformation
-	jsonData, err := json.Marshal(updateInfo)
+	payload, err := instanceToPayLoad(updateInfo)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
-	Data := string(jsonData)
-	payload := strings.NewReader(Data)
 	// Send http request
-	link := backendURL + "/accounts/@me?token=" + cookie.Value
+	link := backendURL + "/accounts/@me?token=" + token
 	request, err := http.NewRequest("PUT", link, payload)
-	request.Header.Add("Content-Type", "application/json")
-	_, err = client.Do(request)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
 	}
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("Cookie", cookieValue)
+	resp, err := client.Do(request)
+	log.Println(resp)
+	if err != nil {
+		log.Println("empty response:", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	client.CloseIdleConnections()
 	// After edited it redirect to the private information page
 	http.Redirect(w, r, "/privatePage/", http.StatusFound)
 }
 
-//
-func passwordHandler() {
+func passwordHandler(w http.ResponseWriter, r *http.Request) {
+	// Get cookie
+	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println("cookie may expire login again", err)
+		// When refactoring the code, a more specific page may needed
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	// Prefetch info to render pages from backend API
+	p, err := readMyProfile(cookieValue)
+	if err != nil {
+		log.Println("cookie may expire login again", err)
+		// When refactoring the code, a more specific page may needed
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	client := &http.Client{}
+	// Set token struct to get token
+	token := TokenInfo{}
+	token.Type = "CRITICAL"
+	token.Value = ""
+	tokenPayload, err := instanceToPayLoad(token)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	// Get token request
+	getTokenURL := backendURL + "/tokens/"
+	request, err := http.NewRequest("POST", getTokenURL, tokenPayload)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("Cookie", cookieValue)
+	response, err := client.Do(request)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	defer response.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	err = json.Unmarshal(bodyBytes, &token)
+	defer client.CloseIdleConnections()
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	updatePassword := updatePassword{}
+	updatePassword.Username = p.Username
+	updatePassword.Password = ""
+	updatePassword.Token = token.Value
+	renderTemplatePassword(w, "changePassword", &updatePassword)
+}
 
+func passwordSaveHandler(w http.ResponseWriter, r *http.Request) {
+	newPassword := r.FormValue("newpassword")
+	passwordConfirm := r.FormValue("passwordconfirm")
+	token := r.FormValue("token")
+	// Get cookie from browser
+	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println("login expire, log in again", err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
+	}
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	originalProfile, err := readMyProfile(cookieValue)
+	if err != nil {
+		log.Println("login expire, log in again", err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
+	}
+	if newPassword != passwordConfirm {
+		log.Println("password does not match", err)
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
+	updatePassword := updatePassword{
+		Username: originalProfile.Username,
+		Password: newPassword,
+		Token:    token}
+	updatePassword.Username = originalProfile.Username
+	updatePassword.Password = newPassword
+	client := &http.Client{}
+	// Struct to JSON payload
+	payload, err := instanceToPayLoad(updatePassword)
+	if err != nil {
+		log.Println("Json transfer failure", err)
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
+	// Send http request
+	link := backendURL + "/accounts/@me?token=" + token
+	request, err := http.NewRequest("PUT", link, payload)
+	if err != nil {
+		log.Println("request failed", err)
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
+	request.Header.Add("Cookie", cookieValue)
+	request.Header.Add("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		log.Println("request failed", err)
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
+	if response.StatusCode == 500 {
+		log.Println("Error Occur when changing password", err)
+		http.Redirect(w, r, "/password/", http.StatusFound)
+		return
+	}
+	client.CloseIdleConnections()
+	http.Redirect(w, r, "/privatePage/", http.StatusFound)
+	return
 }
 
 //
-func savepasswordHandler() {
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	// Get user login in information
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	// Encode the log in data to the json format payload
+	user := logInfo{username, password}
+	payload, err := instanceToPayLoad(user)
+	if err != nil {
+		log.Println("Json decode error", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	response, err := http.Post("http://localhost:8080/v1/sessions/", "application/json", payload)
+	if err != nil || response.StatusCode == 401 {
+		log.Println("login Failure", err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	// Get token from login response from backend
+	token := response.Header.Get("Set-Cookie")
+	// Set the cookies to the browser
+	Cookie := http.Cookie{Name: "V",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true}
+	http.SetCookie(w, &Cookie)
+	http.Redirect(w, r, "/privatePage/", http.StatusFound)
+	return
+}
 
+//
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+	p := profile{}
+	renderTemplate(w, "register", &p)
+}
+
+//
+func privateHandler(w http.ResponseWriter, r *http.Request) {
+	// Read cookie from browser
+	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "http://localhost:8080/v1/accounts/@me", nil)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	req.Header.Add("Cookie", cookieValue)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	defer resp.Body.Close()
+	// Read personal profile data from backend and transform to our data format
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	var pageInfo = profile{}
+	err = json.Unmarshal(bodyBytes, &pageInfo)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
+	}
+	renderTemplate(w, "profile", &pageInfo)
 }
 
 //
 func createHandler(w http.ResponseWriter, r *http.Request) {
-	var pageinfo profile
-	pageinfo.Username = r.FormValue("username")
-	pageinfo.Firstname = r.FormValue("firstname")
-	pageinfo.Lastname = r.FormValue("lastname")
-	pageinfo.Description = r.FormValue("description")
-	pageinfo.Password = r.FormValue("password")
-	pageinfo.Email = r.FormValue("email")
-	pageinfo.Verified = "true"
-	// Read information from frontend page
-	newUser, err := json.Marshal(pageinfo)
+	var pageInfo profile
+	pageInfo.Username = r.FormValue("username")
+	pageInfo.Firstname = r.FormValue("firstname")
+	pageInfo.Lastname = r.FormValue("lastname")
+	pageInfo.Description = r.FormValue("description")
+	pageInfo.Password = r.FormValue("password")
+	pageInfo.Email = r.FormValue("email")
+	pageInfo.Verified = "true"
+
+	payload, err := instanceToPayLoad(pageInfo)
 	if err != nil {
 		log.Println(err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
 	}
-	Data := string(newUser)
-	payload := strings.NewReader(Data)
 	// Encode data to Json
 	_, err = client.Post(backendURL+"/accounts/", "application/json", payload)
 	if err != nil {
-		log.Println(err)
+		log.Println("error occur when creating account", err)
+		http.Redirect(w, r, "/create/", http.StatusFound)
+		return
 	}
 	// Send the request to create a new account
-
-	user := logInfo{}
-	user.Username = pageinfo.Username
-	user.Password = pageinfo.Password
-	userData, err := json.Marshal(user)
-	userString := string(userData)
-	payload = strings.NewReader(userString)
+	user := logInfo{pageInfo.Username,pageInfo.Password}
+	payload,err = instanceToPayLoad(user)
 	response, err := client.Post(backendURL+"/sessions/", "application/json", payload)
 	if err != nil {
 		log.Println(err)
@@ -216,7 +491,7 @@ func createHandler(w http.ResponseWriter, r *http.Request) {
 	// Log in with newly created account information
 	// Get token from login response from backend
 	token := response.Header.Get("Set-Cookie")
-	Cookie := http.Cookie{Name: "name-cookie",
+	Cookie := http.Cookie{Name: "V",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true}
@@ -235,65 +510,39 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, "login", &p)
 }
 
-//
-func loginHandler(w http.ResponseWriter, r *http.Request) {
-	// Get user login in information
-	username := r.FormValue("username")
-	password := r.FormValue("password")
-	// Encode the log in data to the json format payload
-	user := logInfo{}
-	user.Username = username
-	user.Password = password
-	userData, err := json.Marshal(user)
-	userString := string(userData)
-	payload := strings.NewReader(userString)
-	response, err := client.Post(backendURL+"/sessions/", "application/json", payload)
-	if response.StatusCode == 401 {
-		http.Redirect(w, r, "/loginError/", http.StatusFound)
-	}
+func renderTemplateDescription(w http.ResponseWriter, tmpl string, p *updateDescription) {
+	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
 		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	// Get token from login response from backend
-	token := response.Header.Get("Set-Cookie")
-	fmt.Println(token)
-	// Set the cookies to the browser
-	Cookie := http.Cookie{Name: "name-cookie",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true}
-	http.SetCookie(w, &Cookie)
-	http.Redirect(w, r, "/privatePage/", http.StatusFound)
+}
+
+func renderTemplatePassword(w http.ResponseWriter, tmpl string, p *updatePassword) {
+	err := templates.ExecuteTemplate(w, tmpl+".html", p)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+// Regular expression to avoid illegal request
+var validPath = regexp.MustCompile("^(/(edit|accounts|home)/([a-zA-Z0-9]+))|(/(login|home|create|privatePage|register|logout|save|loginError|password|passwordsave)/)$")
+
+func makeHandler(fn func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m := validPath.FindStringSubmatch(r.URL.Path)
+		if m == nil {
+			http.NotFound(w, r)
+			return
+		}
+		fn(w, r)
+	}
 }
 
 //
-func registerHandler(w http.ResponseWriter, r *http.Request) {
-	p := profile{}
-	renderTemplate(w, "register", &p)
-}
-
-//
-func privateHandler(w http.ResponseWriter, r *http.Request) {
-	//fmt.Println("Cookie.......")
-	// Read cookie from browser
-	cookie, _ := r.Cookie("name-cookie")
-	link := backendURL + "/accounts/@me?token=" + cookie.Value
-	resp, err := client.Get(link)
-	if err != nil {
-		log.Println(err)
-	}
-	defer resp.Body.Close()
-	// Read personal profile data from backend and transform to our data format
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	var pageInfo = profile{}
-	err = json.Unmarshal(bodyBytes, &pageInfo)
-	fmt.Println(pageInfo)
-	if err != nil {
-		log.Println(err)
-	}
-	renderTemplate(w, "profile", &pageInfo)
-}
-
 // Handle error when having wrong password and let user to re-enter password
 func errorPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	p := profile{}
@@ -302,7 +551,7 @@ func errorPasswordHandler(w http.ResponseWriter, r *http.Request) {
 
 // When user need to log out, this handler would erase the cookie to clean up the log in status.
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
-	logOutCookie := http.Cookie{Name: "name-cookie",
+	logOutCookie := http.Cookie{Name: "V",
 		Path:   "/",
 		MaxAge: -1}
 	http.SetCookie(w, &logOutCookie)
@@ -314,16 +563,17 @@ func main() {
 	flag.StringVar(&backendAddr, "backend", "localhost:8080", "backend IP and port")
 	flag.Parse()
 	backendURL = "http://" + backendAddr + backendURI
-
-	http.HandleFunc("/accounts/", accountsHandler)
-	http.HandleFunc("/edit/", editHandler)
-	http.HandleFunc("/save/", saveHandler)
-	http.HandleFunc("/register/", registerHandler)
-	http.HandleFunc("/create/", createHandler)
-	http.HandleFunc("/login/", loginHandler)
-	http.HandleFunc("/home/", homeHandler)
-	http.HandleFunc("/privatePage/", privateHandler)
-	http.HandleFunc("/logout/", logoutHandler)
-	http.HandleFunc("/loginError/", errorPasswordHandler)
+	http.HandleFunc("/accounts/", makeHandler(accountsHandler))
+	http.HandleFunc("/edit/", makeHandler(editHandler))
+	http.HandleFunc("/save/", makeHandler(saveEditedInfo))
+	http.HandleFunc("/register/", makeHandler(registerHandler))
+	http.HandleFunc("/create/", makeHandler(createHandler))
+	http.HandleFunc("/login/", makeHandler(loginHandler))
+	http.HandleFunc("/home/", makeHandler(homeHandler))
+	http.HandleFunc("/privatePage/", makeHandler(privateHandler))
+	http.HandleFunc("/logout/", makeHandler(logoutHandler))
+	http.HandleFunc("/loginError/", makeHandler(errorPasswordHandler))
+	http.HandleFunc("/password/", makeHandler(passwordHandler))
+	http.HandleFunc("/passwordsave/", makeHandler(passwordSaveHandler))
 	log.Println(http.ListenAndServe(":5000", nil))
 }
