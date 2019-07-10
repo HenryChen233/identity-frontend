@@ -28,6 +28,12 @@ type updateDescription struct {
 	Token       string `json:"token"`
 }
 
+type updateEmail struct {
+	Username    string `json:"username"`
+	Email       string 	`json:"email"`
+	Token       string 	`json:"token"`
+}
+
 type publicInfo struct {
 	Username    string `json:"username"`
 	Description string `json:"description"`
@@ -224,7 +230,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request) {
 	// Change the information from preloaded information
 	updateInfo := updateDescription{Description: description,
 		Username: originalPage.Username,
-		Token:    token}
+		Token :""}
 	// Json format transformation
 	payload, err := instanceToPayLoad(updateInfo)
 	if err != nil {
@@ -242,8 +248,7 @@ func saveEditedInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("Cookie", cookieValue)
-	resp, err := client.Do(request)
-	log.Println(resp)
+	_, err = client.Do(request)
 	if err != nil {
 		log.Println("empty response:", err)
 		http.Redirect(w, r, "/loginError/", http.StatusFound)
@@ -347,8 +352,6 @@ func passwordSaveHandler(w http.ResponseWriter, r *http.Request) {
 		Username: originalProfile.Username,
 		Password: newPassword,
 		Token:    token}
-	updatePassword.Username = originalProfile.Username
-	updatePassword.Password = newPassword
 	client := &http.Client{}
 	// Struct to JSON payload
 	payload, err := instanceToPayLoad(updatePassword)
@@ -414,6 +417,123 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+func editEmailHandler(w http.ResponseWriter, r *http.Request){
+	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println("cookie may expire login again", err)
+		// When refactoring the code, a more specific page may needed
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	// Prefetch info to render pages from backend API
+	p, err := readMyProfile(cookieValue)
+	if err != nil {
+		log.Println("cookie may expire login again", err)
+		// When refactoring the code, a more specific page may needed
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	client := &http.Client{}
+	// Set token struct to get token
+	token := TokenInfo{}
+	token.Type = "CRITICAL"
+	token.Value = ""
+	tokenPayload, err := instanceToPayLoad(token)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	// Get token request
+	getTokenURL := backendURL + "/tokens/"
+	request, err := http.NewRequest("POST", getTokenURL, tokenPayload)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("Cookie", cookieValue)
+	response, err := client.Do(request)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	defer response.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	err = json.Unmarshal(bodyBytes, &token)
+	defer client.CloseIdleConnections()
+	if err != nil {
+		log.Println(err)
+		http.Redirect(w, r, "/loginError/", http.StatusFound)
+		return
+	}
+	updateEmail := updateEmail{p.Username, p.Email, token.Value}
+	renderTemplateEmail(w, "editEmail", &updateEmail)
+}
+
+func emailSaveHandler(w http.ResponseWriter, r *http.Request){
+	newEmail := r.FormValue("email")
+	token := r.FormValue("CSRFToken")
+	// Get cookie from browser
+	cookie, err := r.Cookie("V")
+	if err != nil {
+		log.Println("login expire, log in again", err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
+	}
+	cookieValue := strings.TrimPrefix(cookie.Value, "cookie=")
+	originalProfile, err := readMyProfile(cookieValue)
+	if err != nil {
+		log.Println("login expire, log in again", err)
+		http.Redirect(w, r, "/home/", http.StatusFound)
+		return
+	}
+	updateEmail := updateEmail{
+		Username: originalProfile.Username,
+		Email:newEmail,
+		Token:""}
+	client := &http.Client{}
+	// Struct to JSON payload
+	payload, err := instanceToPayLoad(updateEmail)
+	if err != nil {
+		log.Println("Json transfer failure", err)
+		http.Redirect(w, r, "/editEmail/", http.StatusFound)
+		return
+	}
+	// Send http request
+	link := backendURL + "/accounts/@me?token=" + token
+	request, err := http.NewRequest("PUT", link, payload)
+	if err != nil {
+		log.Println("request failed", err)
+		http.Redirect(w, r, "/editEmail/", http.StatusFound)
+		return
+	}
+	request.Header.Add("Cookie", cookieValue)
+	request.Header.Add("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		log.Println("request failed", err)
+		http.Redirect(w, r, "/editEmail/", http.StatusFound)
+		return
+	}
+	if response.StatusCode == 500 {
+		log.Println("Error Occur when changing email", err)
+		http.Redirect(w, r, "/editEmail/", http.StatusFound)
+		return
+	}
+	client.CloseIdleConnections()
+	http.Redirect(w, r, "/privatePage/", http.StatusFound)
+	return
+
+}
 //
 func registerHandler(w http.ResponseWriter, r *http.Request) {
 	p := profile{}
@@ -519,6 +639,16 @@ func renderTemplateDescription(w http.ResponseWriter, tmpl string, p *updateDesc
 	}
 }
 
+func renderTemplateEmail(w http.ResponseWriter, tmpl string, p *updateEmail){
+	err := templates.ExecuteTemplate(w, tmpl+".html", p)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+
 func renderTemplatePassword(w http.ResponseWriter, tmpl string, p *updatePassword) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
@@ -529,7 +659,7 @@ func renderTemplatePassword(w http.ResponseWriter, tmpl string, p *updatePasswor
 }
 
 // Regular expression to avoid illegal request
-var validPath = regexp.MustCompile("^(/(edit|accounts|home)/([a-zA-Z0-9]+))|(/(login|home|create|privatePage|register|logout|save|loginError|password|passwordsave)/)$")
+var validPath = regexp.MustCompile("^(/(edit|accounts|home)/([a-zA-Z0-9]+))|(/(login|home|create|privatePage|register|logout|save|loginError|password|passwordsave|editEmail|emailSave)/)$")
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -575,5 +705,7 @@ func main() {
 	http.HandleFunc("/loginError/", makeHandler(errorPasswordHandler))
 	http.HandleFunc("/password/", makeHandler(passwordHandler))
 	http.HandleFunc("/passwordsave/", makeHandler(passwordSaveHandler))
+	http.HandleFunc("/editEmail/", makeHandler(editEmailHandler))
+	http.HandleFunc("/emailSave/", makeHandler(emailSaveHandler))
 	log.Println(http.ListenAndServe(":5000", nil))
 }
